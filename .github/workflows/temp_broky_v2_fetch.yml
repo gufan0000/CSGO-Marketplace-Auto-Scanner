@@ -1,0 +1,85 @@
+name: Temporary broky V2 source fetch
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'temp/broky_v2_fetch_trigger.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg zip
+          python -m pip install -q --upgrade "yt-dlp[default,curl-cffi]"
+
+      - name: Fetch public editing sources
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p out
+          : > out/fetch.log
+          grab() {
+            local name="$1"; shift
+            echo "===== ${name} =====" | tee -a out/fetch.log
+            yt-dlp --no-warnings --no-playlist \
+              --format "bv*[height<=720]/b[height<=720]/b" \
+              --remux-video mp4 \
+              --output "out/${name}.%(ext)s" \
+              "$@" 2>&1 | tee -a out/fetch.log || true
+          }
+
+          # Iconic 2022 BLAST Fall Groups 1v4 ace vs Astralis.
+          grab "01_broky_1v4_astralis_2022" "https://www.bilibili.com/video/BV1ye411g7vo/"
+
+          # IEM Chengdu 2024 MVP highlight compilation.
+          grab "02_broky_chengdu_mvp_2024" "https://www.bilibili.com/video/BV1HC411V7Zm/"
+
+          # Antwerp Major 2022 final, second-map ending / celebration area.
+          yt-dlp --no-warnings --playlist-items 2 --download-sections "*00:49:00-00:57:15" \
+            --format "bv*[height<=720]/b[height<=720]/b" --remux-video mp4 \
+            --output "out/03_antwerp_final_tail.%(ext)s" \
+            "https://www.bilibili.com/video/BV1rcSWYPEhX/" 2>&1 | tee -a out/fetch.log || true
+
+          # Shanghai Major 2024 final, decisive map ending / post-match area.
+          yt-dlp --no-warnings --playlist-items 3 --download-sections "*01:02:00-01:12:04" \
+            --format "bv*[height<=720]/b[height<=720]/b" --remux-video mp4 \
+            --output "out/04_shanghai_final_tail.%(ext)s" \
+            "https://www.bilibili.com/video/BV1NeqoYqECx/" 2>&1 | tee -a out/fetch.log || true
+
+          # Valve-hosted 2025 Budapest Major broky highlight: factual bridge after Shanghai.
+          curl -L --fail --retry 3 --retry-delay 2 \
+            -o out/05_budapest_2025_broky_triple.webm \
+            "https://cdn.steamstatic.com/apps/csgo/videos/highlightreels/025/061v106_005/025_061v106_005_de_nuke_bud2025_qf-broky-triple-kill-on-nuke_ww_1080p.webm" \
+            2>&1 | tee -a out/fetch.log || true
+
+          # Extra early/peak-era material for non-repeating connective shots.
+          grab "06_broky_2020_35frags_vitality" "https://www.bilibili.com/video/BV1Zr4y1w77S/"
+          grab "07_broky_top10_2023" "https://www.bilibili.com/video/BV1Ug4y1D7wr/"
+
+          find out -maxdepth 1 -type f -printf '%f\t%s\n' | sort > out/files.txt
+          for f in out/*; do
+            [ -f "$f" ] || continue
+            case "$f" in *.mp4|*.webm|*.mkv)
+              ffprobe -v error -show_entries format=filename,duration,size -show_entries stream=codec_name,width,height,r_frame_rate -of json "$f" >> out/ffprobe.jsonl 2>/dev/null || true;;
+            esac
+          done
+          cat out/files.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: broky-v2-public-sources
+          path: out/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error

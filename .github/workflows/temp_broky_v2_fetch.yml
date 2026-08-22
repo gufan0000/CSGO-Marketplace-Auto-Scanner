@@ -22,51 +22,50 @@ jobs:
           sudo apt-get install -y -qq ffmpeg zip
           python -m pip install -q --upgrade "yt-dlp[default,curl-cffi]"
 
-      - name: Fetch public editing sources
+      - name: Fetch second-pass public editing sources
         shell: bash
         run: |
           set -uo pipefail
           mkdir -p out
           : > out/fetch.log
+
           grab() {
             local name="$1"; shift
             echo "===== ${name} =====" | tee -a out/fetch.log
             yt-dlp --no-warnings --no-playlist \
-              --format "bv*[height<=720]/b[height<=720]/b" \
-              --remux-video mp4 \
+              --format "bv*[height<=720]+ba/b[height<=720]/b" \
+              --merge-output-format mp4 --remux-video mp4 \
               --output "out/${name}.%(ext)s" \
               "$@" 2>&1 | tee -a out/fetch.log || true
           }
 
-          # Iconic 2022 BLAST Fall Groups 1v4 ace vs Astralis.
-          grab "01_broky_1v4_astralis_2022" "https://www.bilibili.com/video/BV1ye411g7vo/"
-
-          # IEM Chengdu 2024 MVP highlight compilation.
-          grab "02_broky_chengdu_mvp_2024" "https://www.bilibili.com/video/BV1HC411V7Zm/"
-
-          # Antwerp Major 2022 final, second-map ending / celebration area.
-          yt-dlp --no-warnings --playlist-items 2 --download-sections "*00:49:00-00:57:15" \
-            --format "bv*[height<=720]/b[height<=720]/b" --remux-video mp4 \
-            --output "out/03_antwerp_final_tail.%(ext)s" \
-            "https://www.bilibili.com/video/BV1rcSWYPEhX/" 2>&1 | tee -a out/fetch.log || true
-
-          # Shanghai Major 2024 final, decisive map ending / post-match area.
-          yt-dlp --no-warnings --playlist-items 3 --download-sections "*01:02:00-01:12:04" \
-            --format "bv*[height<=720]/b[height<=720]/b" --remux-video mp4 \
-            --output "out/04_shanghai_final_tail.%(ext)s" \
-            "https://www.bilibili.com/video/BV1NeqoYqECx/" 2>&1 | tee -a out/fetch.log || true
-
-          # Valve-hosted 2025 Budapest Major broky highlight: factual bridge after Shanghai.
+          # Direct public Reddit fallback MP4s: known broky clutch sources.
           curl -L --fail --retry 3 --retry-delay 2 \
-            -o out/05_budapest_2025_broky_triple.webm \
+            -o out/01_broky_1v4_astralis_2022.mp4 \
+            "https://v.redd.it/3a9d4we9t4vg1/CMAF_1080.mp4?source=fallback" \
+            2>&1 | tee -a out/fetch.log || true
+          curl -L --fail --retry 3 --retry-delay 2 \
+            -o out/02_broky_1v4_g2.mp4 \
+            "https://v.redd.it/i3v48ayx4w7h1/CMAF_1080.mp4?source=fallback" \
+            2>&1 | tee -a out/fetch.log || true
+
+          # PGL / ESL / PGL-highlight mirrors on YouTube.
+          grab "03_antwerp_broky_pgl" "https://www.youtube.com/watch?v=-i8QyJiM55I"
+          grab "04_chengdu_2024_mvp" "https://www.youtube.com/watch?v=M_4iBLZ79Xc"
+          grab "05_shanghai_2024_final_highlights" "https://www.youtube.com/watch?v=LvcfSP2PUPI"
+
+          # Short BLAST-origin gameplay mirror, useful as unlabeled connective action.
+          grab "06_broky_blast_prefire" "https://www.dailymotion.com/video/xa2ton8"
+          grab "07_broky_clutch_dm" "https://www.dailymotion.com/video/x9s9870"
+
+          # Valve-hosted Budapest Major 2025 clip retained as an official bridge.
+          curl -L --fail --retry 3 --retry-delay 2 \
+            -o out/08_budapest_2025_broky_triple.webm \
             "https://cdn.steamstatic.com/apps/csgo/videos/highlightreels/025/061v106_005/025_061v106_005_de_nuke_bud2025_qf-broky-triple-kill-on-nuke_ww_1080p.webm" \
             2>&1 | tee -a out/fetch.log || true
 
-          # Extra early/peak-era material for non-repeating connective shots.
-          grab "06_broky_2020_35frags_vitality" "https://www.bilibili.com/video/BV1Zr4y1w77S/"
-          grab "07_broky_top10_2023" "https://www.bilibili.com/video/BV1Ug4y1D7wr/"
-
           find out -maxdepth 1 -type f -printf '%f\t%s\n' | sort > out/files.txt
+          : > out/ffprobe.jsonl
           for f in out/*; do
             [ -f "$f" ] || continue
             case "$f" in *.mp4|*.webm|*.mkv)
@@ -78,7 +77,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: broky-v2-public-sources
+          name: broky-v2-public-sources-pass2
           path: out/
           retention-days: 1
           compression-level: 0

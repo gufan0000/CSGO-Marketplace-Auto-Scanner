@@ -1,0 +1,120 @@
+name: Temporary broky media fetch
+
+on:
+  push:
+    branches:
+      - temp/broky-media-20260823
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg zip
+          python -m pip install -U "yt-dlp[default,curl-cffi]" requests beautifulsoup4
+
+      - name: Download selected footage
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p out/video out/web out/logs
+          : > out/logs/download.log
+
+          grab() {
+            local name="$1"; shift
+            echo "===== $name =====" | tee -a out/logs/download.log
+            yt-dlp --no-warnings --concurrent-fragments 4 \
+              --format "bv*[height<=720]+ba/b[height<=720]/b" \
+              --merge-output-format mp4 --remux-video mp4 \
+              --write-info-json --output "out/video/${name}.%(ext)s" \
+              "$@" 2>&1 | tee -a out/logs/download.log || true
+          }
+
+          # broky's iconic BLAST 2022 1v4 ACE clutch vs Astralis (short Bilibili cut)
+          grab "01_broky_1v4_ace_2022" --no-playlist "https://www.bilibili.com/video/BV1ye411g7vo/"
+
+          # broky 2024 Chengdu MVP / peak-era highlight package
+          grab "02_broky_chengdu_mvp_2024" --no-playlist "https://www.bilibili.com/video/BV1HC411V7Zm/"
+
+          # Antwerp 2022 Major final: only closing minutes/celebration section
+          grab "03_antwerp_major_final_tail" --playlist-items 2 --download-sections "*00:49:00-00:57:15" "https://www.bilibili.com/video/BV1rcSWYPEhX/"
+
+          # Shanghai 2024 Major final: only decisive-map tail / post-match section
+          grab "04_shanghai_major_final_tail" --playlist-items 3 --download-sections "*01:02:00-01:12:04" "https://www.bilibili.com/video/BV1NeqoYqECx/"
+
+          # 2025 low point / first bench context
+          grab "05_broky_bench_2025" --no-playlist "https://www.bilibili.com/video/BV1vQL4z4EnW/"
+
+          # 2025 return context
+          grab "06_broky_return_2025" --no-playlist "https://www.bilibili.com/video/BV1KwGNz6EWP/"
+
+          # 2026 final bench / farewell context
+          grab "07_broky_bench_2026" --no-playlist "https://www.bilibili.com/video/BV1ao7q66EXF/"
+          grab "08_broky_goodbye_2026" --no-playlist "https://www.bilibili.com/video/BV1UfM86XEnv/"
+
+          # Reddit mirror of the 2022 1v4 as fallback
+          grab "09_reddit_broky_1v4" --no-playlist "https://www.reddit.com/r/cs2/comments/1sl4sur/broky_1v4_vs_astralis_2022/"
+
+          # Official FaZe Antwerp best-of package as additional celebration source
+          grab "10_faze_antwerp_official" --download-sections "*00:00:00-00:08:00" "https://www.youtube.com/watch?v=IMdRXqYQMOc"
+
+          find out/video -maxdepth 1 -type f -printf '%f\t%s bytes\n' | sort | tee out/logs/files.txt
+          for f in out/video/*.mp4; do
+            [ -f "$f" ] || continue
+            ffprobe -v error -show_entries format=filename,duration,size -show_entries stream=codec_name,width,height,r_frame_rate -of compact=p=0:nk=1 "$f" >> out/logs/ffprobe.txt 2>/dev/null || true
+          done
+
+      - name: Fetch 5EPlay inventory evidence and images
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, re, json, urllib.parse
+          import requests
+          from bs4 import BeautifulSoup
+          url='https://csgo.5eplay.com/article/260626sljypb'
+          out='out/web'; os.makedirs(out, exist_ok=True)
+          h={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36'}
+          r=requests.get(url, headers=h, timeout=30)
+          open(out+'/5e_article.html','wb').write(r.content)
+          soup=BeautifulSoup(r.text,'html.parser')
+          imgs=[]
+          for tag in soup.find_all('img'):
+              src=tag.get('data-src') or tag.get('src') or tag.get('data-original')
+              if not src: continue
+              src=urllib.parse.urljoin(url,src)
+              if src.startswith('http'): imgs.append(src)
+          open(out+'/5e_image_urls.json','w',encoding='utf-8').write(json.dumps(imgs,ensure_ascii=False,indent=2))
+          for i,src in enumerate(dict.fromkeys(imgs)):
+              try:
+                  rr=requests.get(src,headers=h,timeout=30)
+                  if rr.status_code==200 and len(rr.content)>15000:
+                      ext='.webp' if 'webp' in rr.headers.get('content-type','') else '.jpg'
+                      open(f'{out}/5e_img_{i:02d}{ext}','wb').write(rr.content)
+              except Exception:
+                  pass
+          print('status',r.status_code,'bytes',len(r.content),'images',len(imgs))
+          PY
+          find out/web -maxdepth 1 -type f -printf '%f\t%s bytes\n' | sort | tee out/logs/web_files.txt
+
+      - name: Package
+        run: |
+          printf '%s\n' 'Temporary broky montage source package. Use short transformed excerpts only.' > out/README.txt
+          zip -r -1 broky_media.zip out
+          ls -lh broky_media.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: broky-media
+          path: broky_media.zip
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error
